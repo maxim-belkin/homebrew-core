@@ -54,6 +54,7 @@ class Root < Formula
   end
 
   skip_clean "bin"
+  allow_missing_libs
 
   def install
     # Work around "error: no member named 'signbit' in the global namespace"

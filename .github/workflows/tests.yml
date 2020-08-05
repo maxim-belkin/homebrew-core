@@ -11,7 +11,7 @@ jobs:
       - name: Set up Homebrew
         id: set-up-homebrew
         run: |
-          if which brew &>/dev/null; then
+          if which brew 1>/dev/null 2>/dev/null; then
             HOMEBREW_PREFIX="$(brew --prefix)"
             HOMEBREW_REPOSITORY="$HOMEBREW_PREFIX/Homebrew"
             brew update-reset "$HOMEBREW_REPOSITORY"

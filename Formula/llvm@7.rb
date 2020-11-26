@@ -27,7 +27,7 @@ class LlvmAT7 < Formula
   depends_on xcode: :build
   depends_on "libffi"
 
-  unless OS.mac?
+  on_linux do
     depends_on "gcc" # needed for libstdc++
     if Formula["glibc"].any_version_installed? || OS::Linux::Glibc.system_version < Formula["glibc"].version
       depends_on "glibc"
@@ -46,7 +46,7 @@ class LlvmAT7 < Formula
     url "https://releases.llvm.org/7.1.0/cfe-7.1.0.src.tar.xz"
     sha256 "e97dc472aae52197a4d5e0185eb8f9e04d7575d2dc2b12194ddc768e0f8a846d"
 
-    unless OS.mac?
+    on_linux do
       patch do
         url "https://gist.githubusercontent.com/iMichka/027fd3d17b4c729e73a190ae29e44b47/raw/a88c628f28ca9cd444cc3771072260fe46ff8a29/llvm7.patch?full_index=1"
         sha256 "8db2acff4fbe0533667c9a0527a6a180fd2a84daea4271665fd42f88a08eaa86"
@@ -109,7 +109,7 @@ class LlvmAT7 < Formula
     # can almost be treated as an entirely different build from llvm.
     ENV.permit_arch_flags
 
-    unless OS.mac?
+    on_linux do
       # see https://llvm.org/docs/HowToCrossCompileBuiltinsOnArm.html#the-cmake-try-compile-stage-fails
       # Basically, the stage1 clang will try to locate a gcc toolchain and often
       # get the default from /usr/local, which might contains an old version of
@@ -139,19 +139,24 @@ class LlvmAT7 < Formula
       -DLLVM_CREATE_XCODE_TOOLCHAIN=ON
     ]
 
-    if OS.mac?
+    on_macos do
       args << "-DLLVM_ENABLE_LIBCXX=ON"
-    else
-      args << "-DLLVM_ENABLE_LIBCXX=OFF"
-      args << "-DCLANG_DEFAULT_CXX_STDLIB=libstdc++"
+      if MacOS.version >= :mojave
+        sdk_path = MacOS::CLT.installed? ? "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk" : MacOS.sdk_path
+        args << "-DDEFAULT_SYSROOT=#{sdk_path}"
+      end
+
+      xz = "2.7"
     end
 
-    # Enable llvm gold plugin for LTO
-    args << "-DLLVM_BINUTILS_INCDIR=#{Formula["binutils"].opt_include}" unless OS.mac?
+    on_linux do
+      args << "-DLLVM_ENABLE_LIBCXX=OFF"
+      args << "-DCLANG_DEFAULT_CXX_STDLIB=libstdc++"
 
-    if OS.mac? && MacOS.version >= :mojave
-      sdk_path = MacOS::CLT.installed? ? "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk" : MacOS.sdk_path
-      args << "-DDEFAULT_SYSROOT=#{sdk_path}"
+      # Enable llvm gold plugin for LTO
+      args << "-DLLVM_BINUTILS_INCDIR=#{Formula["binutils"].opt_include}"
+
+      xz = "3.8"
     end
 
     mkdir "build" do
@@ -172,11 +177,10 @@ class LlvmAT7 < Formula
     man1.install_symlink share/"clang/tools/scan-build/man/scan-build.1"
 
     # install llvm python bindings
-    xz = OS.mac? ? "2.7": "3.8"
     (lib/"python#{xz}/site-packages").install buildpath/"bindings/python/llvm"
     (lib/"python#{xz}/site-packages").install buildpath/"tools/clang/bindings/python/clang"
 
-    unless OS.mac?
+    on_linux do
       # Remove conflicting libraries.
       # libgomp.so conflicts with gcc.
       rm lib/"libgomp.so"
@@ -246,46 +250,46 @@ class LlvmAT7 < Formula
       }
     EOS
 
-    unless OS.mac?
+    on_linux do
       system "#{bin}/clang++", "-v", "test.cpp", "-o", "test"
       assert_equal "Hello World!", shell_output("./test").chomp
     end
 
-    # Testing Command Line Tools
-    if OS.mac? && MacOS::CLT.installed?
-      toolchain_path = "/Library/Developer/CommandLineTools"
-      sdk_path = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
-      system "#{bin}/clang++", "-v",
-             "-isysroot", sdk_path,
-             "-isystem", "#{toolchain_path}/usr/include/c++/v1",
-             "-isystem", "#{toolchain_path}/usr/include",
-             "-isystem", "#{sdk_path}/usr/include",
-             "-std=c++11", "test.cpp", "-o", "testCLT++"
-      assert_includes MachO::Tools.dylibs("testCLT++"), "/usr/lib/libc++.1.dylib"
-      assert_equal "Hello World!", shell_output("./testCLT++").chomp
-      system "#{bin}/clang", "-v", "test.c", "-o", "testCLT"
-      assert_equal "Hello World!", shell_output("./testCLT").chomp
-    end
+    on_macos do
+      # Test Command Line Tools
+      if MacOS::CLT.installed?
+        toolchain_path = "/Library/Developer/CommandLineTools"
+        sdk_path = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
+        system "#{bin}/clang++", "-v",
+              "-isysroot", sdk_path,
+              "-isystem", "#{toolchain_path}/usr/include/c++/v1",
+              "-isystem", "#{toolchain_path}/usr/include",
+              "-isystem", "#{sdk_path}/usr/include",
+              "-std=c++11", "test.cpp", "-o", "testCLT++"
+        assert_includes MachO::Tools.dylibs("testCLT++"), "/usr/lib/libc++.1.dylib"
+        assert_equal "Hello World!", shell_output("./testCLT++").chomp
+        system "#{bin}/clang", "-v", "test.c", "-o", "testCLT"
+        assert_equal "Hello World!", shell_output("./testCLT").chomp
+      end
 
-    # Testing Xcode
-    if OS.mac? && MacOS::Xcode.installed?
-      system "#{bin}/clang++", "-v",
-             "-isysroot", MacOS.sdk_path,
-             "-isystem", "#{MacOS::Xcode.toolchain_path}/usr/include/c++/v1",
-             "-isystem", "#{MacOS::Xcode.toolchain_path}/usr/include",
-             "-isystem", "#{MacOS.sdk_path}/usr/include",
-             "-std=c++11", "test.cpp", "-o", "testXC++"
-      assert_includes MachO::Tools.dylibs("testXC++"), "/usr/lib/libc++.1.dylib"
-      assert_equal "Hello World!", shell_output("./testXC++").chomp
-      system "#{bin}/clang", "-v",
-             "-isysroot", MacOS.sdk_path,
-             "test.c", "-o", "testXC"
-      assert_equal "Hello World!", shell_output("./testXC").chomp
-    end
+      # Test Xcode
+      if MacOS::Xcode.installed?
+        system "#{bin}/clang++", "-v",
+              "-isysroot", MacOS.sdk_path,
+              "-isystem", "#{MacOS::Xcode.toolchain_path}/usr/include/c++/v1",
+              "-isystem", "#{MacOS::Xcode.toolchain_path}/usr/include",
+              "-isystem", "#{MacOS.sdk_path}/usr/include",
+              "-std=c++11", "test.cpp", "-o", "testXC++"
+        assert_includes MachO::Tools.dylibs("testXC++"), "/usr/lib/libc++.1.dylib"
+        assert_equal "Hello World!", shell_output("./testXC++").chomp
+        system "#{bin}/clang", "-v",
+              "-isysroot", MacOS.sdk_path,
+              "test.c", "-o", "testXC"
+        assert_equal "Hello World!", shell_output("./testXC").chomp
+      end
 
-    # link against installed libc++
-    # related to https://github.com/Homebrew/legacy-homebrew/issues/47149
-    if OS.mac?
+      # link against installed libc++
+      # related to https://github.com/Homebrew/legacy-homebrew/issues/47149
       system "#{bin}/clang++", "-v",
              "-isystem", "#{opt_include}/c++/v1",
              "-std=c++11", "-stdlib=libc++", "test.cpp", "-o", "testlibc++",
